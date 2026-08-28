@@ -8,6 +8,7 @@ parts of what gets uploaded.
 import argparse
 import html
 from pathlib import Path
+from urllib.parse import urlparse
 
 TITLE = "python-rtmidi wheels"
 
@@ -23,6 +24,8 @@ PAGE = """<!DOCTYPE html>
 <p>Unofficial builds of python-rtmidi {version}, for CPython versions upstream does not publish
 wheels for. The Linux wheels carry both ALSA and JACK, the macOS wheels CoreMIDI, and the
 Windows wheels the multimedia API.</p>
+<p>Built and published by <a href="{repo}">{repo_name}</a>, which holds the build configuration
+and describes what goes into each wheel.</p>
 <p>Install with:</p>
 <pre>pip install --find-links {url} python-rtmidi=={version}</pre>
 <p>pip picks the wheel matching the interpreter it runs under, and falls back to building
@@ -45,7 +48,17 @@ Visual C++ redistributable installed.</p>
 LINK = '<li><a href="{name}">{name}</a></li>'
 
 
-def build_page(directory: Path, version: str, url: str) -> str:
+def repository_name(url: str) -> str:
+    """Return the owner and name a repository URL ends in, for use as link text."""
+    parts = urlparse(url).path.strip("/").split("/")
+
+    if len(parts) < 2:
+        raise RuntimeError(f"not a repository URL: {url}")
+
+    return "/".join(parts[:2])
+
+
+def build_page(directory: Path, version: str, url: str, repo: str) -> str:
     """Render the index for every wheel in a directory."""
     wheels = sorted(path.name for path in directory.glob("*.whl"))
 
@@ -58,6 +71,8 @@ def build_page(directory: Path, version: str, url: str) -> str:
         title=html.escape(TITLE),
         version=html.escape(version),
         url=html.escape(url),
+        repo=html.escape(repo),
+        repo_name=html.escape(repository_name(repo)),
         links=links,
     )
 
@@ -67,9 +82,10 @@ def main() -> int:
     parser.add_argument("directory", type=Path, help="the directory of wheels to index")
     parser.add_argument("version", help="the python-rtmidi release these were built from")
     parser.add_argument("url", help="the published address of that directory")
+    parser.add_argument("repo", help="the repository these were built from")
     arguments = parser.parse_args()
 
-    page = build_page(arguments.directory, arguments.version, arguments.url)
+    page = build_page(arguments.directory, arguments.version, arguments.url, arguments.repo)
     (arguments.directory / "index.html").write_text(page, encoding="utf-8")
     (arguments.directory / ".nojekyll").touch()
 

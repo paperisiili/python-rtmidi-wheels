@@ -145,7 +145,9 @@ jobs:
         env:
           VERSION: ${{ needs.sdist.outputs.version }}
           BASE_URL: ${{ steps.pages.outputs.base_url }}
-        run: python3 make_index.py site "$VERSION" "$BASE_URL/"
+          # Taken from the run rather than written down, so a rename or a fork stays correct.
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: python3 make_index.py site "$VERSION" "$BASE_URL/" "$REPO_URL"
 
       - uses: actions/upload-pages-artifact@v5
         with:
