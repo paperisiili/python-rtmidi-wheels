@@ -35,7 +35,16 @@ or, in a `requirements.txt`:
 python-rtmidi==1.5.8
 ```
 
-pip picks the wheel matching the interpreter it is running under and falls back to building upstream's source distribution from PyPI when none matches, so pinning this source does not strand anyone on a Python that has no wheel here. If the address is unreachable pip warns and carries on to PyPI rather than failing the install.
+or, for uv, in a `pyproject.toml` beside an ordinary `python-rtmidi==1.5.8` under `[project]`:
+
+```
+[tool.uv]
+find-links = ["https://paperisiili.github.io/python-rtmidi-wheels/"]
+```
+
+A `pyproject.toml` has nowhere else to put this. `[project]` describes dependencies without saying where they come from, and the only address it can carry is a direct link to one file, which would pin a single Python version and a single platform. Where the wheels are found is the installer's own setting every time: the table above for uv, `PIP_FIND_LINKS` or `pip.conf` for pip itself.
+
+Whichever of those is used, the wheel matching the interpreter is the one picked, and a Python with no wheel here falls back to building upstream's source distribution from PyPI, so naming this source strands nobody. If the address is unreachable pip warns and carries on to PyPI rather than failing the install.
 
 ## Building
 
