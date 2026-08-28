@@ -1,0 +1,155 @@
+name: Build wheels
+
+# Publishing writes to Pages, and two deployments racing each other would leave whichever
+# finished second in place regardless of which built last.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: python-rtmidi release to build, or empty for the default below
+        required: false
+        default: ""
+  push:
+    tags:
+      - "v*"
+
+env:
+  # The release the wheels are built from. Changing this line is the whole of moving to a new
+  # upstream version; a manual run can override it without editing anything.
+  DEFAULT_RTMIDI_VERSION: "1.5.8"
+  # Pinned so a cibuildwheel release cannot change what these wheels are on its own.
+  CIBUILDWHEEL_VERSION: "4.2.0"
+
+jobs:
+  sdist:
+    name: Fetch source distribution
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # The requested version arrives through the environment rather than being substituted into
+      # the script, and is checked to be a plain release identifier before it reaches a command
+      # line or the step's output.
+      - name: Resolve the version to build
+        id: resolve
+        env:
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          version="${REQUESTED:-$DEFAULT_RTMIDI_VERSION}"
+          case "$version" in
+            "" | *[!0-9A-Za-z.-]*)
+              echo "Not a plain release identifier: '$version'" >&2
+              exit 1
+              ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Building python-rtmidi $version"
+
+      # Fetched once and passed to the build jobs as an artifact, so every platform builds from
+      # the same bytes rather than each resolving the release separately.
+      - name: Download it
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: python3 fetch_sdist.py "$VERSION" sdist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sdist
+          path: sdist/*.tar.gz
+
+  build:
+    name: ${{ matrix.name }}
+    needs: sdist
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # One runner per architecture, which is what lets cibuildwheel's default "auto" stand in
+        # for an explicit arch list. Native throughout, so nothing is built under emulation.
+        include:
+          - { os: ubuntu-24.04, name: Linux x86_64 }
+          - { os: ubuntu-24.04-arm, name: Linux aarch64 }
+          - { os: macos-15-intel, name: macOS x86_64 }
+          - { os: macos-15, name: macOS arm64 }
+          - { os: windows-2025, name: Windows AMD64 }
+    steps:
+      - uses: actions/checkout@v7
+
+      # cibuildwheel runs under this one; the interpreters it builds for are its own affair.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: sdist
+          path: sdist
+
+      - name: Install cibuildwheel
+        run: python -m pip install "cibuildwheel==${{ env.CIBUILDWHEEL_VERSION }}"
+
+      # Building from the sdist rather than a checkout is what lets this repository hold no copy
+      # of python-rtmidi, and --config-file is what replaces the settings inside it.
+      #
+      # Every path is made absolute first. cibuildwheel does not resolve a relative --config-file
+      # against the working directory when the package it is handed is an sdist, whatever its
+      # --help says, and the same doubt applies to the other two. Resolving them through the
+      # interpreter that goes on to run cibuildwheel also keeps them in each runner's own native
+      # form rather than the shell's.
+      - name: Build
+        shell: bash
+        run: |
+          sdist=$(python -c "import pathlib; print(next(pathlib.Path('sdist').glob('*.tar.gz')).resolve())")
+          config=$(python -c "import pathlib; print(pathlib.Path('cibuildwheel.toml').resolve())")
+          output=$(python -c "import pathlib; print(pathlib.Path('wheelhouse').resolve())")
+          python -m cibuildwheel --config-file "$config" --output-dir "$output" "$sdist"
+
+      - name: Inspect what was built
+        shell: bash
+        run: python inspect_wheels.py wheelhouse
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
+  publish:
+    name: Publish to Pages
+    needs: [sdist, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/configure-pages@v6
+        id: pages
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: site
+
+      - name: Write the index
+        env:
+          VERSION: ${{ needs.sdist.outputs.version }}
+          BASE_URL: ${{ steps.pages.outputs.base_url }}
+        run: python3 make_index.py site "$VERSION" "$BASE_URL/"
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+      - uses: actions/deploy-pages@v5
+        id: deploy

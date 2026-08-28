@@ -1,0 +1,69 @@
+# Build settings for the python-rtmidi wheels this repository publishes.
+#
+# Passed to cibuildwheel with --config-file, which replaces the [tool.cibuildwheel] block inside
+# the sdist rather than merging with it, so upstream's choice of Python versions does not carry
+# over.
+#
+# On Linux and macOS archs is left at its default of "auto": each job builds only what its own
+# runner is, and the workflow's matrix supplies one runner per architecture. Setting archs for
+# those here instead would make every runner try to build every architecture. Windows is the
+# exception and is pinned below, because "auto" there covers 32-bit as well as 64-bit.
+
+[tool.cibuildwheel]
+build = "cp313-* cp314-*"
+skip = "*-musllinux_*"
+build-frontend = "build"
+
+# Stated rather than left to the default, because which backends end up in these wheels is the
+# main thing this repository decides.
+config-settings = { setup-args = "-Djack=true" }
+
+[tool.cibuildwheel.linux]
+manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
+
+# ALSA headers, then JACK built from source, since the manylinux images package neither JACK nor
+# a JACK development package.
+before-all = [
+    "dnf -y install alsa-lib-devel",
+    "curl -sSfLo jack2.tar.gz https://codeload.github.com/jackaudio/jack2/tar.gz/refs/tags/v1.9.22",
+    "tar -xzf jack2.tar.gz",
+    "cd jack2-1.9.22",
+    "python3 waf configure --prefix=/usr --autostart=none --classic --pkgconfigdir=/usr/lib64/pkgconfig",
+    "python3 waf build",
+    "python3 waf install",
+]
+
+# libasound is left as a system library, which is what upstream does and what every machine with
+# ALSA already satisfies. libjack is copied in instead, so that a wheel built against JACK still
+# imports on a machine that has never installed it.
+repair-wheel-command = "auditwheel repair --exclude libasound.so.2 --lib-sdir . -w {dest_dir} {wheel}"
+
+# Both backends are asserted because with JACK present the build marks ALSA as optional: a failed
+# or forgotten alsa-lib-devel would otherwise yield a JACK-only wheel, quietly and with nothing
+# in the build failing. get_compiled_api() reports what was linked without opening a device, so
+# this passes inside a container with no /dev/snd/seq. Every quote inside is single, so the one
+# line runs under both sh and cmd.
+test-command = '''python -c "import rtmidi; api = rtmidi.get_compiled_api(); assert rtmidi.API_LINUX_ALSA in api, 'ALSA was not compiled in'; assert rtmidi.API_UNIX_JACK in api, 'JACK was not compiled in'; print('compiled APIs:', [rtmidi.get_api_display_name(a) for a in api])"'''
+
+[tool.cibuildwheel.macos]
+# CoreMIDI comes from the SDK, so there is nothing to install. JACK is available for macOS but is
+# not installed here, matching upstream, so these are CoreMIDI-only.
+test-command = '''python -c "import rtmidi; api = rtmidi.get_compiled_api(); assert rtmidi.API_MACOSX_CORE in api, 'CoreMIDI was not compiled in'; print('compiled APIs:', [rtmidi.get_api_display_name(a) for a in api])"'''
+
+[tool.cibuildwheel.windows]
+# The multimedia API comes from the platform SDK, so there is nothing to install. JACK exists for
+# Windows but is not installed here, matching upstream. Pinned to 64-bit, which the default would
+# otherwise widen to include 32-bit.
+archs = ["AMD64"]
+
+# --vsenv activates the Visual Studio environment. Without it the build picks up whichever GCC is
+# on the runner's PATH and produces a MinGW extension instead: several times the size, statically
+# linked against GCC's runtime, and dragging a copy of the system C runtime into the wheel behind
+# it. CPython on Windows is an MSVC build, so its extensions should be too.
+#
+# The jack setting is repeated rather than added to, because a platform table replaces the
+# top-level config-settings rather than merging with it.
+config-settings = { setup-args = ["-Djack=true", "--vsenv"] }
+
+test-command = '''python -c "import rtmidi; api = rtmidi.get_compiled_api(); assert rtmidi.API_WINDOWS_MM in api, 'Windows MultiMedia was not compiled in'; print('compiled APIs:', [rtmidi.get_api_display_name(a) for a in api])"'''
