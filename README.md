@@ -55,4 +55,4 @@ The Linux wheels additionally contain libjack from [jack2](https://github.com/ja
 
 The Windows wheels contain msvcp140.dll, Microsoft's C++ runtime, so that they work on a machine without the Visual C++ redistributable installed. It is redistributed under the terms Microsoft grants for that runtime's files.
 
-The build configuration and scripts here are yours to treat as you like.
+The build configuration and scripts in this repository are placed in the public domain under CC0 1.0; see `LICENSE`.
