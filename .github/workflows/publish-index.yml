@@ -62,10 +62,7 @@ jobs:
           BASE_URL: ${{ steps.pages.outputs.base_url }}
           # Taken from the run rather than written down, so a rename or a fork stays correct.
           REPO_URL: ${{ github.server_url }}/${{ github.repository }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          python make_index.py releases.json sums site "$BASE_URL/" "$REPO_URL" \
-            --commit "$GITHUB_SHA" --run-url "$RUN_URL"
+        run: python make_index.py releases.json sums site "$BASE_URL/" "$REPO_URL"
 
       - uses: actions/upload-pages-artifact@v5
         with:

@@ -19,7 +19,6 @@ import html
 import json
 import re
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 TITLE = "python-rtmidi wheels (unofficial)"
@@ -58,7 +57,6 @@ a provenance notice travel inside each wheel, and the exact source tree is attac
 release. The Windows wheels bundle msvcp140.dll, Microsoft's C++ runtime, so they work without
 the Visual C++ redistributable installed. python-rtmidi itself is MIT, and its license travels
 inside every wheel.</p>
-<p><small>Generated from commit {commit} by <a href="{run_url}">this run</a>, {date}.</small></p>
 </body>
 </html>
 """
@@ -166,8 +164,6 @@ def main() -> int:
     parser.add_argument("directory", type=Path, help="where to write the site")
     parser.add_argument("url", help="the published address of the page")
     parser.add_argument("repo", help="the repository the wheels are built from")
-    parser.add_argument("--commit", default="unknown", help="the commit generating the page")
-    parser.add_argument("--run-url", default="", help="the workflow run generating the page")
     arguments = parser.parse_args()
 
     releases = indexable(json.loads(arguments.releases.read_text(encoding="utf-8")))
@@ -183,9 +179,6 @@ def main() -> int:
         repo=html.escape(arguments.repo),
         repo_name=html.escape(repository_name(arguments.repo)),
         releases="\n".join(sections),
-        commit=html.escape(arguments.commit[:12]),
-        run_url=html.escape(arguments.run_url),
-        date=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
     )
 
     arguments.directory.mkdir(parents=True, exist_ok=True)
