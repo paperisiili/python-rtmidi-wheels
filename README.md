@@ -87,14 +87,34 @@ their own. Superseding a build means cutting a new release, not touching an old 
 
 ## Verifying
 
-Each link on the index names its wheel's SHA-256 in the fragment, which pip checks on download
-and matches when an install [pins hashes](https://pip.pypa.io/en/stable/topics/secure-installs/).
-Every release carries a `SHA256SUMS` file, and every wheel a sigstore attestation binding it to
-the workflow run that built it:
+Each link on the index names its wheel's SHA-256 in the fragment, which pip checks on every
+download. Every release carries a `SHA256SUMS` file, and every wheel a sigstore attestation
+binding it to the workflow run that built it:
 
 ```
 gh attestation verify python_rtmidi-….whl --repo paperisiili/python-rtmidi-wheels
 ```
+
+[Pinning hashes](https://pip.pypa.io/en/stable/topics/secure-installs/) turns verification into
+a requirement. In a `requirements.txt`, name the exact wheels the environment is allowed to
+install:
+
+```
+--find-links https://paperisiili.github.io/python-rtmidi-wheels/
+--only-binary python-rtmidi
+python-rtmidi==1.5.8 \
+    --hash=sha256:0123…cdef \
+    --hash=sha256:89ab…4567
+```
+
+One `--hash` per wheel that might be picked — a Linux CI runner and a macOS laptop installing
+from the same file means two — with the digests copied from the release's `SHA256SUMS` or from
+the index links. pip then refuses any file whose digest is not listed, wherever it came from. A
+hash on any line makes pip demand hashes for every requirement in the file; python-rtmidi
+depends on nothing, so the file above is already complete.
+
+uv users get the same without writing digests: `uv lock` records each wheel's URL and SHA-256
+in `uv.lock`, and `uv sync` verifies them. `pip-compile --generate-hashes` does it for pip.
 
 ## Building
 
