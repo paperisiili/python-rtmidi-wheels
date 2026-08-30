@@ -1,12 +1,16 @@
 """Write the index page that pip reads when this repository is used as a --find-links source.
 
 pip only needs anchors pointing at the wheels, so the surrounding prose is for whoever opens the
-page in a browser. A .nojekyll file is written alongside it, without which GitHub Pages filters
-parts of what gets uploaded.
+page in a browser. Each anchor carries the wheel's SHA-256 in its fragment, which pip reads to
+verify downloads and to keep preferring these wheels when an install pins hashes. The digests are
+also printed, so the run's log holds what a hash pin needs. A .nojekyll file is written alongside
+the page, without which GitHub Pages filters parts of what gets uploaded.
 """
 
 import argparse
+import hashlib
 import html
+from collections.abc import Mapping
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -29,7 +33,8 @@ and describes what goes into each wheel.</p>
 <p>Install with:</p>
 <pre>pip install --find-links {url} python-rtmidi=={version}</pre>
 <p>pip picks the wheel matching the interpreter it runs under, and falls back to building
-upstream's source distribution from PyPI when none of these matches.</p>
+upstream's source distribution from PyPI when none of these matches. Each link names the wheel's
+SHA-256, which pip checks the download against when an install pins hashes.</p>
 <h2>Wheels</h2>
 <ul>
 {links}
@@ -45,7 +50,7 @@ Visual C++ redistributable installed.</p>
 </html>
 """
 
-LINK = '<li><a href="{name}">{name}</a></li>'
+LINK = '<li><a href="{name}#sha256={digest}">{name}</a></li>'
 
 
 def repository_name(url: str) -> str:
@@ -58,14 +63,26 @@ def repository_name(url: str) -> str:
     return "/".join(parts[:2])
 
 
-def build_page(directory: Path, version: str, url: str, repo: str) -> str:
-    """Render the index for every wheel in a directory."""
-    wheels = sorted(path.name for path in directory.glob("*.whl"))
+def wheel_digests(directory: Path) -> dict[str, str]:
+    """Map each wheel's name to the SHA-256 of its bytes, in name order."""
+    wheels = sorted(directory.glob("*.whl"))
 
     if not wheels:
         raise RuntimeError(f"no wheels found in {directory}")
 
-    links = "\n".join(LINK.format(name=html.escape(name)) for name in wheels)
+    digests: dict[str, str] = {}
+    for path in wheels:
+        with path.open("rb") as handle:
+            digests[path.name] = hashlib.file_digest(handle, "sha256").hexdigest()
+
+    return digests
+
+
+def build_page(digests: Mapping[str, str], version: str, url: str, repo: str) -> str:
+    """Render the index for every wheel a digest is held for."""
+    links = "\n".join(
+        LINK.format(name=html.escape(name), digest=digest) for name, digest in digests.items()
+    )
 
     return PAGE.format(
         title=html.escape(TITLE),
@@ -85,12 +102,15 @@ def main() -> int:
     parser.add_argument("repo", help="the repository these were built from")
     arguments = parser.parse_args()
 
-    page = build_page(arguments.directory, arguments.version, arguments.url, arguments.repo)
+    digests = wheel_digests(arguments.directory)
+    page = build_page(digests, arguments.version, arguments.url, arguments.repo)
     (arguments.directory / "index.html").write_text(page, encoding="utf-8")
     (arguments.directory / ".nojekyll").touch()
 
-    count = len(list(arguments.directory.glob("*.whl")))
-    print(f"Indexed {count} wheel(s)")
+    print(f"Indexed {len(digests)} wheel(s):")
+    for name, digest in digests.items():
+        print(f"  {digest}  {name}")
+
     return 0
 
 
