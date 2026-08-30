@@ -124,8 +124,11 @@ jobs:
         with:
           subject-path: dist/*.whl
 
-      # The tag targets the commit the wheels were built from, which also keeps that commit
-      # reachable whatever happens to its branch.
+      # The tag marks the default branch as of the release. It cannot mark the build commit
+      # itself: tagging anything but the head commit needs the workflows permission whenever
+      # workflow files are involved, and GITHUB_TOKEN can never hold that one. The commit the
+      # wheels were actually built from is recorded in the notes instead, with the run that
+      # built them.
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -145,7 +148,6 @@ jobs:
           } > notes.md
           gh release create "$TAG" dist/* \
             --repo "$GITHUB_REPOSITORY" \
-            --target "$SHA" \
             --title "$TAG: python-rtmidi $version" \
             --notes-file notes.md
 
