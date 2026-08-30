@@ -38,13 +38,7 @@ CPython versions upstream does not publish wheels for. Built and published by
 into each wheel.</p>
 <p>Install with:</p>
 <pre>pip install --only-binary python-rtmidi --find-links {url} python-rtmidi</pre>
-<p>pip picks the wheel matching the interpreter it runs under; --only-binary makes a missing
-wheel an error instead of a silent fall back to compiling the source distribution from PyPI,
-which needs the compiler and headers these wheels exist to spare. Wheels differing only in the
-build number after the version are rebuilds of the same release, newest preferred
-automatically.</p>
-<h2>Releases</h2>
-{releases}
+<p>--only-binary makes a missing wheel an error instead of a silent build from source.</p>
 <h2>Verifying</h2>
 <p>Each link names its wheel's SHA-256 in the fragment, which pip checks on download and matches
 when an install pins hashes. Every release also carries a SHA256SUMS file, and each wheel a
@@ -57,6 +51,10 @@ a provenance notice travel inside each wheel, and the exact source tree is attac
 release. The Windows wheels bundle msvcp140.dll, Microsoft's C++ runtime, so they work without
 the Visual C++ redistributable installed. python-rtmidi itself is MIT, and its license travels
 inside every wheel.</p>
+<h2>Releases</h2>
+<p>Newest first. Wheels differing only in the build number after the version are rebuilds of
+the same release; installers prefer the highest on their own.</p>
+{releases}
 </body>
 </html>
 """
