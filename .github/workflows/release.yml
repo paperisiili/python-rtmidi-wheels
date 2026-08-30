@@ -1,0 +1,158 @@
+name: Release wheels
+
+# Turns one green "Build wheels" run into a permanent GitHub release, then republishes the
+# index. A separate, deliberate step so the wheels can be looked over between building and
+# publishing: run "Build wheels", inspect its logs and artifacts, then dispatch this with the
+# run's ID.
+#
+# Releases are this repository's wheel store, numbered v1, v2, ... in their own sequence. Each
+# wheel is stamped with the release number as its wheel build tag, so wheels for the same
+# python-rtmidi version from different releases coexist under distinct filenames: installers
+# prefer the highest build number automatically, published files never change or disappear, and
+# recorded hash pins keep resolving. Superseding a build means cutting a new release, not
+# touching an old one.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: ID of the green "Build wheels" run whose wheels to release
+        required: true
+      notes:
+        description: Why this release exists, shown on the release and the index
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Create the release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write # the release and its tag
+      actions: read # the build run and its artifacts
+      id-token: write # signing the attestations
+      attestations: write # storing them
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Look up the build run
+        id: buildrun
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          case "$RUN_ID" in
+            "" | *[!0-9]*)
+              echo "run_id must be a number, got '$RUN_ID'" >&2
+              exit 1
+              ;;
+          esac
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" > run.json
+          path=$(jq -r .path run.json)
+          conclusion=$(jq -r .conclusion run.json)
+          if [ "$path" != ".github/workflows/build-wheels.yml" ] || [ "$conclusion" != "success" ]; then
+            echo "Run $RUN_ID is $path with conclusion '$conclusion'; need a green Build wheels run" >&2
+            exit 1
+          fi
+          echo "url=$(jq -r .html_url run.json)" >> "$GITHUB_OUTPUT"
+          echo "sha=$(jq -r .head_sha run.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Download its wheels
+        uses: actions/download-artifact@v8
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download its jack2 source archive
+        uses: actions/download-artifact@v8
+        with:
+          name: jack2-source
+          path: dist
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+
+      # One more than the highest existing vN, so numbers stay unique even if a release is ever
+      # deleted. --paginate applies the query per page and concatenates lines, so this survives
+      # more than one page of releases.
+      - name: Number the release
+        id: number
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate --jq '.[].tag_name' \
+            | sed -n 's/^v\([0-9][0-9]*\)$/\1/p' | sort -n | tail -1)
+          tag="v$((${last:-0} + 1))"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "This will be $tag"
+
+      # wheel tags writes a renamed copy and keeps the original, hence the rm. The build number
+      # lands in both the filename and the WHEEL metadata, and RECORD is kept correct.
+      - name: Stamp the wheels with the release number
+        env:
+          TAG: ${{ steps.number.outputs.tag }}
+        run: |
+          python -m pip install wheel
+          for whl in dist/*.whl; do
+            python -m wheel tags --build "${TAG#v}" "$whl"
+            rm "$whl"
+          done
+          ls -1 dist
+
+      - name: Write SHA256SUMS
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.tmp
+          mv SHA256SUMS.tmp SHA256SUMS
+          cat SHA256SUMS
+
+      # Sigstore-backed provenance for every wheel; anyone can check a download with
+      #   gh attestation verify <wheel> --repo <this repository>
+      - name: Attest the wheels
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/*.whl
+
+      # The tag targets the commit the wheels were built from, which also keeps that commit
+      # reachable whatever happens to its branch.
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.number.outputs.tag }}
+          NOTES: ${{ inputs.notes }}
+          RUN_URL: ${{ steps.buildrun.outputs.url }}
+          SHA: ${{ steps.buildrun.outputs.sha }}
+        run: |
+          set -- dist/*.whl
+          version=$(basename "$1" | cut -d- -f2)
+          {
+            printf '%s\n\n' "$NOTES"
+            echo "python-rtmidi $version, built from commit $SHA by $RUN_URL."
+            echo "Wheel digests are in SHA256SUMS, and each wheel carries a sigstore attestation:"
+            echo '`gh attestation verify <wheel> --repo '"$GITHUB_REPOSITORY"'`.'
+            echo "The bundled jack2's exact source tree is attached."
+          } > notes.md
+          gh release create "$TAG" dist/* \
+            --target "$SHA" \
+            --title "$TAG: python-rtmidi $version" \
+            --notes-file notes.md
+
+  index:
+    name: Publish the index
+    needs: release
+    uses: ./.github/workflows/publish-index.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write

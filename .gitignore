@@ -1,4 +1,8 @@
 __pycache__/
+dist/
+jack2/
+releases.json
 sdist/
 site/
+sums/
 wheelhouse/

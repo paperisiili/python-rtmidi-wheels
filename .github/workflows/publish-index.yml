@@ -1,0 +1,75 @@
+name: Publish index
+
+# Regenerates the Pages index over every release and deploys it. release.yml calls this after
+# cutting a release; it can also be dispatched alone, for changing the page's text or reflecting
+# a deleted release without building anything.
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+# Publishing writes to Pages, and two deployments racing each other would leave whichever
+# finished second in place regardless of which generated last.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  index:
+    name: Generate and deploy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - uses: actions/configure-pages@v6
+        id: pages
+
+      # --paginate --slurp collects the pages into an array of arrays; jq add flattens them.
+      # Each release's SHA256SUMS carries the digests the index links need, so the wheels
+      # themselves never have to be downloaded here.
+      - name: Fetch the releases and their digests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate --slurp \
+            | jq add > releases.json
+          mkdir -p sums
+          tags=$(jq -r '.[] | select((.draft or .prerelease) | not) | .tag_name' releases.json \
+            | grep -E '^v[0-9]+$' || true)
+          for tag in $tags; do
+            gh release download "$tag" --pattern SHA256SUMS --output "sums/$tag"
+          done
+
+      - name: Write the index
+        env:
+          BASE_URL: ${{ steps.pages.outputs.base_url }}
+          # Taken from the run rather than written down, so a rename or a fork stays correct.
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python make_index.py releases.json sums site "$BASE_URL/" "$REPO_URL" \
+            --commit "$GITHUB_SHA" --run-url "$RUN_URL"
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+      - uses: actions/deploy-pages@v5
+        id: deploy
