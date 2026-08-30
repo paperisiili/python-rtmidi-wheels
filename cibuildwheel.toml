@@ -2,7 +2,8 @@
 #
 # Passed to cibuildwheel with --config-file, which replaces the [tool.cibuildwheel] block inside
 # the sdist rather than merging with it, so upstream's choice of Python versions does not carry
-# over.
+# over. The replacement is wholesale, which also means upstream's own test hook would be silently
+# lost; it is restated in the test-command lists below.
 #
 # On Linux and macOS archs is left at its default of "auto": each job builds only what its own
 # runner is, and the workflow's matrix supplies one runner per architecture. Setting archs for
@@ -11,24 +12,36 @@
 
 [tool.cibuildwheel]
 build = "cp313-* cp314-*"
+# musllinux (Alpine and other musl systems) is not built, matching upstream: the JACK build in
+# before-all is dnf- and glibc-specific, and no one has asked. Musl systems fall back to
+# compiling the sdist. The README says so too.
 skip = "*-musllinux_*"
 build-frontend = "build"
 
-# Stated rather than left to the default, because which backends end up in these wheels is the
-# main thing this repository decides.
+# Declarative rather than load-bearing: jack already defaults to true in upstream's
+# meson_options.txt, and meson looks JACK up with required: false, so this setting cannot fail a
+# build whose JACK install broke. The test-command assertions below are the actual guarantee.
 config-settings = { setup-args = "-Djack=true" }
+
+# Upstream's CI-marked test suite, restated because --config-file replaces the block that
+# carried it. Each platform's test-command runs it before its own backend assertions.
+test-requires = ["pytest"]
 
 [tool.cibuildwheel.linux]
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
 
 # ALSA headers, then JACK built from source, since the manylinux images package neither JACK nor
-# a JACK development package.
+# a JACK development package. JACK is fetched as a git clone pinned to the commit that v1.9.22
+# points at today: a tag can be repointed, a commit cannot, so a moved tag fails the equality
+# check instead of silently changing what gets bundled. The same version and commit are recorded
+# in .github/workflows/build-wheels.yml (JACK2_VERSION / JACK2_COMMIT), where the identical
+# source tree is archived for publication beside the wheels — keep the two files in step.
 before-all = [
     "dnf -y install alsa-lib-devel",
-    "curl -sSfLo jack2.tar.gz https://codeload.github.com/jackaudio/jack2/tar.gz/refs/tags/v1.9.22",
-    "tar -xzf jack2.tar.gz",
-    "cd jack2-1.9.22",
+    "git clone --depth 1 --branch v1.9.22 https://github.com/jackaudio/jack2",
+    "cd jack2",
+    "test \"$(git rev-parse HEAD)\" = 4f58969432339a250ce87fe855fb962c67d00ddb",
     "python3 waf configure --prefix=/usr --autostart=none --classic --pkgconfigdir=/usr/lib64/pkgconfig",
     "python3 waf build",
     "python3 waf install",
@@ -36,20 +49,28 @@ before-all = [
 
 # libasound is left as a system library, which is what upstream does and what every machine with
 # ALSA already satisfies. libjack is copied in instead, so that a wheel built against JACK still
-# imports on a machine that has never installed it.
-repair-wheel-command = "auditwheel repair --exclude libasound.so.2 --lib-sdir . -w {dest_dir} {wheel}"
+# imports on a machine that has never installed it; it lands in auditwheel's default
+# python_rtmidi.libs directory. After the build, the workflow runs inject_licenses.py so the
+# bundled library's LGPL text and provenance notice travel inside each Linux wheel.
+repair-wheel-command = "auditwheel repair --exclude libasound.so.2 -w {dest_dir} {wheel}"
 
 # Both backends are asserted because with JACK present the build marks ALSA as optional: a failed
 # or forgotten alsa-lib-devel would otherwise yield a JACK-only wheel, quietly and with nothing
 # in the build failing. get_compiled_api() reports what was linked without opening a device, so
-# this passes inside a container with no /dev/snd/seq. Every quote inside is single, so the one
-# line runs under both sh and cmd.
-test-command = '''python -c "import rtmidi; api = rtmidi.get_compiled_api(); assert rtmidi.API_LINUX_ALSA in api, 'ALSA was not compiled in'; assert rtmidi.API_UNIX_JACK in api, 'JACK was not compiled in'; print('compiled APIs:', [rtmidi.get_api_display_name(a) for a in api])"'''
+# this passes inside a container with no /dev/snd/seq. Every quote inside is single, so the
+# assertion line runs under both sh and cmd.
+test-command = [
+    "pytest -v -m ci {package}/tests",
+    '''python -c "import rtmidi; api = rtmidi.get_compiled_api(); assert rtmidi.API_LINUX_ALSA in api, 'ALSA was not compiled in'; assert rtmidi.API_UNIX_JACK in api, 'JACK was not compiled in'; print('compiled APIs:', [rtmidi.get_api_display_name(a) for a in api])"''',
+]
 
 [tool.cibuildwheel.macos]
 # CoreMIDI comes from the SDK, so there is nothing to install. JACK is available for macOS but is
 # not installed here, matching upstream, so these are CoreMIDI-only.
-test-command = '''python -c "import rtmidi; api = rtmidi.get_compiled_api(); assert rtmidi.API_MACOSX_CORE in api, 'CoreMIDI was not compiled in'; print('compiled APIs:', [rtmidi.get_api_display_name(a) for a in api])"'''
+test-command = [
+    "pytest -v -m ci {package}/tests",
+    '''python -c "import rtmidi; api = rtmidi.get_compiled_api(); assert rtmidi.API_MACOSX_CORE in api, 'CoreMIDI was not compiled in'; print('compiled APIs:', [rtmidi.get_api_display_name(a) for a in api])"''',
+]
 
 [tool.cibuildwheel.windows]
 # The multimedia API comes from the platform SDK, so there is nothing to install. JACK exists for
@@ -66,4 +87,27 @@ archs = ["AMD64"]
 # top-level config-settings rather than merging with it.
 config-settings = { setup-args = ["-Djack=true", "--vsenv"] }
 
-test-command = '''python -c "import rtmidi; api = rtmidi.get_compiled_api(); assert rtmidi.API_WINDOWS_MM in api, 'Windows MultiMedia was not compiled in'; print('compiled APIs:', [rtmidi.get_api_display_name(a) for a in api])"'''
+# Stated explicitly even though it matches cibuildwheel's default, because the README's claim
+# that the Windows wheels carry msvcp140.dll rests on it: delvewheel bundles the MSVC runtime so
+# the wheels import on machines without the Visual C++ redistributable installed.
+repair-wheel-command = "delvewheel repair -w {dest_dir} -v {wheel}"
+
+test-command = [
+    "pytest -v -m ci {package}/tests",
+    '''python -c "import rtmidi; api = rtmidi.get_compiled_api(); assert rtmidi.API_WINDOWS_MM in api, 'Windows MultiMedia was not compiled in'; print('compiled APIs:', [rtmidi.get_api_display_name(a) for a in api])"''',
+]
+
+# macOS deployment targets pinned to what cibuildwheel 4.2.0 defaults to today, so a future
+# cibuildwheel bump cannot silently move the floor the published platform tags advertise.
+# CPython 3.13 itself needs 10.13 on Intel and 3.14 needs 10.15; arm64 begins at macOS 11.
+[[tool.cibuildwheel.overrides]]
+select = "cp313*-macosx_x86_64"
+environment = { MACOSX_DEPLOYMENT_TARGET = "10.13" }
+
+[[tool.cibuildwheel.overrides]]
+select = "cp314*-macosx_x86_64"
+environment = { MACOSX_DEPLOYMENT_TARGET = "10.15" }
+
+[[tool.cibuildwheel.overrides]]
+select = "*-macosx_arm64"
+environment = { MACOSX_DEPLOYMENT_TARGET = "11.0" }

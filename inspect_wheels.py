@@ -16,10 +16,10 @@ def report(wheel: Path) -> None:
         total = sum(info.file_size for info in members)
 
         print(f"\n{wheel.name}")
-        print(f"  {total / 1024:.1f} kB uncompressed, {wheel.stat().st_size / 1024:.1f} kB on disk")
+        print(f"  {total / 1024:.1f} KiB uncompressed, {wheel.stat().st_size / 1024:.1f} KiB on disk")
 
         for info in members:
-            print(f"  {info.file_size / 1024:10.1f} kB  {info.filename}")
+            print(f"  {info.file_size / 1024:10.1f} KiB  {info.filename}")
 
 
 def main() -> int:
