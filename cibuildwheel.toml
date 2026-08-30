@@ -11,11 +11,12 @@
 # exception and is pinned below, because "auto" there covers 32-bit as well as 64-bit.
 
 [tool.cibuildwheel]
-# cp313t and cp314t are the free-threaded interpreters, which upstream has no wheels for either.
-# python-rtmidi's extension predates free-threading, so importing it turns the GIL back on for
-# that process (CPython says so on import); the wheel still spares those interpreters the
-# compiler-and-headers requirement, which is this repository's whole point.
-build = "cp313-* cp313t-* cp314-* cp314t-*"
+# cp314t is the free-threaded interpreter, which upstream has no wheels for either. 3.13's
+# free-threading was experimental and cibuildwheel 4.x refuses cp313t outright, so 3.13t still
+# falls back to the sdist. python-rtmidi's extension predates free-threading, so importing it
+# turns the GIL back on for that process (CPython says so on import); the wheel still spares the
+# interpreter the compiler-and-headers requirement, which is this repository's whole point.
+build = "cp313-* cp314-* cp314t-*"
 # musllinux (Alpine and other musl systems) is not built, matching upstream: the JACK build in
 # before-all is dnf- and glibc-specific, and no one has asked. Musl systems fall back to
 # compiling the sdist. The README says so too.

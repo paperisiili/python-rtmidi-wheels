@@ -36,9 +36,9 @@ env:
   # the in-container build — keep the two files in step.
   JACK2_VERSION: "1.9.22"
   JACK2_COMMIT: "4f58969432339a250ce87fe855fb962c67d00ddb"
-  # 4 interpreters (3.13, 3.13t, 3.14, 3.14t) x 5 platform targets. Update when the build list
-  # in cibuildwheel.toml or the matrix below changes.
-  EXPECTED_WHEELS: "20"
+  # 3 interpreters (3.13, 3.14, 3.14t) x 5 platform targets. Update when the build list in
+  # cibuildwheel.toml or the matrix below changes.
+  EXPECTED_WHEELS: "15"
 
 jobs:
   sdist:
@@ -144,8 +144,10 @@ jobs:
           name: sdist
           path: sdist
 
-      # wheel is for inject_licenses.py on Linux; harmless elsewhere.
+      # wheel is for inject_licenses.py on Linux; harmless elsewhere. bash on every platform,
+      # because the Windows default shell would not expand $CIBUILDWHEEL_VERSION.
       - name: Install cibuildwheel
+        shell: bash
         run: python -m pip install "cibuildwheel==$CIBUILDWHEEL_VERSION" wheel
 
       # Building from the sdist rather than a checkout is what lets this repository hold no copy
