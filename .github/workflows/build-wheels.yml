@@ -1,10 +1,9 @@
 name: Build wheels
 
-# Publishing writes to Pages, and two deployments racing each other would leave whichever
-# finished second in place regardless of which built last.
-concurrency:
-  group: pages
-  cancel-in-progress: false
+# Building and publishing are separate workflows. This one only fetches sources and produces
+# checked wheel artifacts; release.yml turns one of its runs into a GitHub release, and
+# publish-index.yml serves every release on the Pages index. Nothing here needs more than read
+# access, and no step after checkout needs the token at all.
 
 on:
   workflow_dispatch:
@@ -13,29 +12,54 @@ on:
         description: python-rtmidi release to build, or empty for the default below
         required: false
         default: ""
-  push:
-    tags:
-      - "v*"
+  schedule:
+    # Monthly canary. It builds the default version and publishes nothing; its only purpose is
+    # the failure email when something outside this repository has rotted — a retired runner
+    # image, a moved package, an upstream change — before a build is urgently needed. GitHub
+    # disables cron workflows after ~60 days without repository activity and emails about that
+    # too; re-enabling is one click on the Actions page.
+    - cron: "43 6 5 * *"
+
+permissions:
+  contents: read
 
 env:
-  # The release the wheels are built from. Changing this line is the whole of moving to a new
-  # upstream version; a manual run can override it without editing anything.
+  # The release the wheels are built from. Moving to a new upstream release means changing this
+  # line, adding the sdist digest to PINNED in fetch_sdist.py, and re-reading the README's
+  # version notes; a manual run can override the version without editing anything.
   DEFAULT_RTMIDI_VERSION: "1.5.8"
-  # Pinned so a cibuildwheel release cannot change what these wheels are on its own.
+  # Pinned so a cibuildwheel release cannot change what these wheels are on its own. Bumping it
+  # is also how new CPython versions arrive; revisit when adding one.
   CIBUILDWHEEL_VERSION: "4.2.0"
+  # The jack2 to build and bundle into the Linux wheels. The commit is what v1.9.22 pointed at
+  # when it was pinned: tags can move, commits cannot. cibuildwheel.toml holds the same pin for
+  # the in-container build — keep the two files in step.
+  JACK2_VERSION: "1.9.22"
+  JACK2_COMMIT: "4f58969432339a250ce87fe855fb962c67d00ddb"
+  # 2 CPython versions x 5 platform targets. Update when the build list in cibuildwheel.toml or
+  # the matrix below changes.
+  EXPECTED_WHEELS: "10"
 
 jobs:
   sdist:
-    name: Fetch source distribution
+    name: Fetch sources
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     outputs:
       version: ${{ steps.resolve.outputs.version }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
 
       # The requested version arrives through the environment rather than being substituted into
-      # the script, and is checked to be a plain release identifier before it reaches a command
-      # line or the step's output.
+      # the script, and is checked to be a plain release identifier — starting with a digit, so
+      # it cannot masquerade as a command-line option — before it reaches a command line or the
+      # step's output.
       - name: Resolve the version to build
         id: resolve
         env:
@@ -43,7 +67,7 @@ jobs:
         run: |
           version="${REQUESTED:-$DEFAULT_RTMIDI_VERSION}"
           case "$version" in
-            "" | *[!0-9A-Za-z.-]*)
+            "" | [!0-9]* | *[!0-9A-Za-z.-]*)
               echo "Not a plain release identifier: '$version'" >&2
               exit 1
               ;;
@@ -53,25 +77,52 @@ jobs:
 
       # Fetched once and passed to the build jobs as an artifact, so every platform builds from
       # the same bytes rather than each resolving the release separately.
-      - name: Download it
+      - name: Download the source distribution
         env:
           VERSION: ${{ steps.resolve.outputs.version }}
-        run: python3 fetch_sdist.py "$VERSION" sdist
+        run: python fetch_sdist.py "$VERSION" sdist
 
       - uses: actions/upload-artifact@v7
         with:
           name: sdist
           path: sdist/*.tar.gz
 
+      # The exact jack2 tree the Linux containers build is archived here, from the same pinned
+      # commit their clone is checked against, so each release can publish the source of the
+      # library its wheels bundle — the LGPL asks the distributor to provide it, not to point
+      # elsewhere.
+      - name: Archive the jack2 source
+        run: |
+          git clone --depth 1 --branch "v$JACK2_VERSION" https://github.com/jackaudio/jack2
+          cd jack2
+          head=$(git rev-parse HEAD)
+          if [ "$head" != "$JACK2_COMMIT" ]; then
+            echo "jack2 tag v$JACK2_VERSION points at $head, not the pinned $JACK2_COMMIT" >&2
+            exit 1
+          fi
+          git archive --format=tar.gz --prefix="jack2-$JACK2_VERSION/" \
+            -o "../jack2-$JACK2_VERSION-source.tar.gz" HEAD
+          cd ..
+          sha256sum "jack2-$JACK2_VERSION-source.tar.gz"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: jack2-source
+          path: jack2-*-source.tar.gz
+
   build:
     name: ${{ matrix.name }}
     needs: sdist
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         # One runner per architecture, which is what lets cibuildwheel's default "auto" stand in
         # for an explicit arch list. Native throughout, so nothing is built under emulation.
+        # macos-15-intel is GitHub's last Intel runner class; when it retires, either move that
+        # leg to an arm64 runner with archs=x86_64 (cross-compiling, tests under Rosetta) or
+        # drop x86_64 deliberately.
         include:
           - { os: ubuntu-24.04, name: Linux x86_64 }
           - { os: ubuntu-24.04-arm, name: Linux aarch64 }
@@ -80,6 +131,8 @@ jobs:
           - { os: windows-2025, name: Windows AMD64 }
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       # cibuildwheel runs under this one; the interpreters it builds for are its own affair.
       - uses: actions/setup-python@v7
@@ -91,8 +144,9 @@ jobs:
           name: sdist
           path: sdist
 
+      # wheel is for inject_licenses.py on Linux; harmless elsewhere.
       - name: Install cibuildwheel
-        run: python -m pip install "cibuildwheel==${{ env.CIBUILDWHEEL_VERSION }}"
+        run: python -m pip install "cibuildwheel==$CIBUILDWHEEL_VERSION" wheel
 
       # Building from the sdist rather than a checkout is what lets this repository hold no copy
       # of python-rtmidi, and --config-file is what replaces the settings inside it.
@@ -105,10 +159,23 @@ jobs:
       - name: Build
         shell: bash
         run: |
-          sdist=$(python -c "import pathlib; print(next(pathlib.Path('sdist').glob('*.tar.gz')).resolve())")
+          sdist=$(python - <<'EOF'
+          import pathlib, sys
+          found = sorted(pathlib.Path("sdist").glob("*.tar.gz"))
+          if len(found) != 1:
+              sys.exit(f"expected exactly one sdist, found {len(found)}: {found}")
+          print(found[0].resolve())
+          EOF
+          )
           config=$(python -c "import pathlib; print(pathlib.Path('cibuildwheel.toml').resolve())")
           output=$(python -c "import pathlib; print(pathlib.Path('wheelhouse').resolve())")
           python -m cibuildwheel --config-file "$config" --output-dir "$output" "$sdist"
+
+      # auditwheel bundles libjack but no license file; the LGPL text and provenance notice are
+      # added here so they travel inside the artifact.
+      - name: Add the bundled libjack's license files
+        if: runner.os == 'Linux'
+        run: python inject_licenses.py wheelhouse licenses/jack2
 
       - name: Inspect what was built
         shell: bash
@@ -119,39 +186,29 @@ jobs:
           name: wheels-${{ matrix.os }}
           path: wheelhouse/*.whl
 
-  publish:
-    name: Publish to Pages
+  # One look at the merged set, which no single build job can take: the right number of wheels,
+  # every one for the requested release, and every one carrying what the README says it does.
+  check:
+    name: Check the wheel set
     needs: [sdist, build]
     runs-on: ubuntu-24.04
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
-      - uses: actions/configure-pages@v6
-        id: pages
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
 
       - uses: actions/download-artifact@v8
         with:
           pattern: wheels-*
           merge-multiple: true
-          path: site
+          path: wheelhouse
 
-      - name: Write the index
+      - name: Check the set
         env:
           VERSION: ${{ needs.sdist.outputs.version }}
-          BASE_URL: ${{ steps.pages.outputs.base_url }}
-          # Taken from the run rather than written down, so a rename or a fork stays correct.
-          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
-        run: python3 make_index.py site "$VERSION" "$BASE_URL/" "$REPO_URL"
-
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: site
-
-      - uses: actions/deploy-pages@v5
-        id: deploy
+        run: python check_wheels.py wheelhouse "$VERSION" "$EXPECTED_WHEELS"
