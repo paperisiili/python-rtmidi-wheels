@@ -55,7 +55,7 @@ before-all = [
 # libasound is left as a system library, which is what upstream does and what every machine with
 # ALSA already satisfies. libjack is copied in instead, so that a wheel built against JACK still
 # imports on a machine that has never installed it; it lands in auditwheel's default
-# python_rtmidi.libs directory. After the build, the workflow runs inject_licenses.py so the
+# python_rtmidi.libs directory. After the build, the workflow runs add_notices.py so the
 # bundled library's LGPL text and provenance notice travel inside each Linux wheel.
 repair-wheel-command = "auditwheel repair --exclude libasound.so.2 -w {dest_dir} {wheel}"
 

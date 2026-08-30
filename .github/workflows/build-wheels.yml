@@ -144,7 +144,7 @@ jobs:
           name: sdist
           path: sdist
 
-      # wheel is for inject_licenses.py on Linux; harmless elsewhere. bash on every platform,
+      # wheel is for add_notices.py on Linux; harmless elsewhere. bash on every platform,
       # because the Windows default shell would not expand $CIBUILDWHEEL_VERSION.
       - name: Install cibuildwheel
         shell: bash
@@ -177,7 +177,7 @@ jobs:
       # added here so they travel inside the artifact.
       - name: Add the bundled libjack's license files
         if: runner.os == 'Linux'
-        run: python inject_licenses.py wheelhouse licenses/jack2
+        run: python add_notices.py wheelhouse licenses/jack2
 
       - name: Inspect what was built
         shell: bash
