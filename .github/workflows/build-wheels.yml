@@ -36,9 +36,9 @@ env:
   # the in-container build — keep the two files in step.
   JACK2_VERSION: "1.9.22"
   JACK2_COMMIT: "4f58969432339a250ce87fe855fb962c67d00ddb"
-  # 2 CPython versions x 5 platform targets. Update when the build list in cibuildwheel.toml or
-  # the matrix below changes.
-  EXPECTED_WHEELS: "10"
+  # 4 interpreters (3.13, 3.13t, 3.14, 3.14t) x 5 platform targets. Update when the build list
+  # in cibuildwheel.toml or the matrix below changes.
+  EXPECTED_WHEELS: "20"
 
 jobs:
   sdist:
