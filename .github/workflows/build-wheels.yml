@@ -24,9 +24,8 @@ permissions:
   contents: read
 
 env:
-  # The release the wheels are built from. Moving to a new upstream release means changing this
-  # line, adding the sdist digest to PINNED in fetch_sdist.py, and re-reading the README's
-  # version notes; a manual run can override the version without editing anything.
+  # The release the wheels are built from. MAINTAINING.md has the checklist for moving to a new
+  # upstream release; a manual run can override the version without editing anything.
   DEFAULT_RTMIDI_VERSION: "1.5.8"
   # Pinned so a cibuildwheel release cannot change what these wheels are on its own. Bumping it
   # is also how new CPython versions arrive; revisit when adding one.

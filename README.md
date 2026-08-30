@@ -1,7 +1,9 @@
 # python-rtmidi wheels
 
 Unofficial builds of [python-rtmidi](https://github.com/SpotlightKid/python-rtmidi) for the
-CPython versions upstream does not publish wheels for.
+CPython versions upstream does not publish wheels for. Upstream stops at 3.12; on anything
+newer, pip compiles the source distribution, which needs a C++ compiler and the Python and ALSA
+headers on the machine. These wheels remove that requirement.
 
 ## Installing
 
@@ -27,27 +29,12 @@ no-build-package = ["python-rtmidi"]
 ```
 
 pip picks the wheel matching the interpreter it runs under, and pinning `python-rtmidi==1.5.8`
-works as usual. `--only-binary` (uv's `no-build-package`) is worth the extra words: without it,
-an interpreter with no wheel here quietly falls back to compiling upstream's source
-distribution, which needs the C++ compiler and headers these wheels exist to spare — with it, a
-missing wheel is an error that says what is wrong.
+works as usual. `--only-binary` (uv's `no-build-package`) turns a missing wheel into an error
+that says what is wrong, instead of a silent fall back to compiling the source distribution.
 
-A `pyproject.toml` has nowhere under `[project]` to put any of this. That table describes
-dependencies without saying where they come from, and the only address it can carry is a direct
-link to one file, which would pin a single Python version and a single platform. Where wheels
-are found is the installer's own setting every time: the uv table above (or its named-index
-spelling, `[[tool.uv.index]]` with `format = "flat"`), `PIP_FIND_LINKS` or `pip.conf` for pip
-itself.
+## What you get
 
-## Why
-
-Upstream's newest release ships wheels for CPython 3.8 through 3.12 only. On anything newer pip
-falls back to the source distribution, so installing python-rtmidi means having a C++ compiler,
-the Python headers and the ALSA headers on the machine. These wheels remove that requirement.
-
-## What gets built
-
-Fifteen wheels per release: CPython 3.13, 3.14 and free-threaded 3.14t, across five targets.
+CPython 3.13, 3.14 and free-threaded 3.14t, across five targets:
 
 | Platform | Architectures | Needs | MIDI backends |
 | -------- | ------------- | ----- | ------------- |
@@ -55,49 +42,20 @@ Fifteen wheels per release: CPython 3.13, 3.14 and free-threaded 3.14t, across f
 | macOS    | x86_64, arm64 | macOS 10.13 (3.13) / 10.15 (3.14) on Intel, 11 on arm64 | CoreMIDI |
 | Windows  | AMD64         | nothing extra | Windows multimedia |
 
-The Linux wheels are built on `manylinux_2_28` images; auditwheel grades what they actually
-require, which comes out at glibc 2.24. They link `libasound` from the system rather than
-bundling it, which is what upstream does and what any machine with ALSA already satisfies.
-libjack is bundled instead, so a wheel built against JACK still imports on a machine that has
-never installed it — its LGPL license text and a provenance notice travel inside each wheel, in
-`dist-info/licenses/jack2/`. The Windows wheels bundle msvcp140.dll, so they work without the
-Visual C++ redistributable installed.
-
-python-rtmidi's extension predates free-threading, so on 3.14t importing it re-enables the GIL
-for that process (CPython prints a notice); the install itself still needs nothing beyond pip.
-Not built, and falling back to the source distribution: musllinux (Alpine and other musl
-systems, matching upstream), 3.13t (its free-threading was experimental and build tooling has
-dropped it), and Windows arm64.
-
-Every wheel is tested after building — upstream's CI-marked pytest suite, then an assertion on
-the backends it actually ended up with.
-
-## Releases and versions
-
-The wheels live as GitHub release assets, and the index page is only links to them. Releases
-are numbered v1, v2, … in this repository's own sequence; each states which python-rtmidi
-version it builds and why it exists. A release never changes after publication, so a wheel URL
-and its digest are permanent, and hash-pinned installs keep resolving as long as this
-repository exists.
-
-Each wheel's filename carries its release number as the wheel build tag — the `-1-` in
-`python_rtmidi-1.5.8-1-cp313-…` — so rebuilt wheels for the same python-rtmidi version coexist
-with their predecessors under distinct names, and installers prefer the highest build number on
-their own. Superseding a build means cutting a new release, not touching an old one.
+The Linux wheels bundle libjack — its LGPL license text travels inside each wheel — and use the
+system's libasound. The Windows wheels bundle msvcp140.dll, so the Visual C++ redistributable
+is not needed. On 3.14t, importing python-rtmidi re-enables the GIL for that process (its
+extension predates free-threading); installing still needs nothing beyond pip. Not built, and
+falling back to the source distribution: musllinux (Alpine), 3.13t, and Windows arm64.
 
 ## Verifying
 
-Each link on the index names its wheel's SHA-256 in the fragment, which pip checks on every
-download. Every release carries a `SHA256SUMS` file, and every wheel a sigstore attestation
-binding it to the workflow run that built it:
-
-```
-gh attestation verify python_rtmidi-….whl --repo paperisiili/python-rtmidi-wheels
-```
-
-[Pinning hashes](https://pip.pypa.io/en/stable/topics/secure-installs/) turns verification into
-a requirement. In a `requirements.txt`, name the exact wheels the environment is allowed to
-install:
+Wheels differing only in the build number after the version — the `-1-` in
+`python_rtmidi-1.5.8-1-cp313-…` — are rebuilds of the same release, newest preferred
+automatically, and no published wheel ever changes or disappears. Each index link names its
+wheel's SHA-256, which pip checks on download;
+[pinning hashes](https://pip.pypa.io/en/stable/topics/secure-installs/) makes that a
+requirement:
 
 ```
 --find-links https://paperisiili.github.io/python-rtmidi-wheels/
@@ -107,54 +65,30 @@ python-rtmidi==1.5.8 \
     --hash=sha256:89ab…4567
 ```
 
-One `--hash` per wheel that might be picked — a Linux CI runner and a macOS laptop installing
-from the same file means two — with the digests copied from the release's `SHA256SUMS` or from
-the index links. pip then refuses any file whose digest is not listed, wherever it came from. A
-hash on any line makes pip demand hashes for every requirement in the file; python-rtmidi
-depends on nothing, so the file above is already complete.
+One `--hash` per wheel that might be picked, with digests copied from the release's
+`SHA256SUMS` or the index links; python-rtmidi depends on nothing, so that file is complete as
+shown. uv records digests on its own in `uv.lock`, as does `pip-compile --generate-hashes`.
+Every wheel also carries a sigstore attestation binding it to the workflow run that built it:
 
-uv users get the same without writing digests: `uv lock` records each wheel's URL and SHA-256
-in `uv.lock`, and `uv sync` verifies them. `pip-compile --generate-hashes` does it for pip.
+```
+gh attestation verify python_rtmidi-….whl --repo paperisiili/python-rtmidi-wheels
+```
 
-## Building
+## How they are built
 
-This is not a fork. No copy of python-rtmidi lives here — the build downloads the release's own
-source distribution from PyPI, verifies it against a digest pinned in `fetch_sdist.py`, and
-builds it unmodified with the settings in `cibuildwheel.toml`. The bundled libjack is built from
-a jack2 checkout pinned by commit, and the exact source tree is archived with each release.
-
-Three workflows, run from the Actions tab:
-
-- **Build wheels** builds and checks a full wheel set from a python-rtmidi version (empty input
-  means `DEFAULT_RTMIDI_VERSION`) and publishes nothing. It also runs monthly on its own, as a
-  canary: a red run means a runner image, package, or upstream surface rotted, and GitHub's
-  failure email says so before it matters.
-- **Release wheels** takes a green build run's ID and release notes, stamps the wheels with the
-  next release number, and publishes them as that GitHub release — the deliberate step between
-  building and serving.
-- **Publish index** regenerates the Pages index over every release. Release wheels ends by
-  running it; dispatched alone it republishes page text or reflects a deleted release.
-
-Moving to a new upstream release: change `DEFAULT_RTMIDI_VERSION` in
-`.github/workflows/build-wheels.yml`, add the sdist digest to `PINNED` in `fetch_sdist.py`, and
-update the version this README names. A new CPython version is one entry in the `build` line of
-`cibuildwheel.toml`, plus whatever cibuildwheel bump first supports it. The repository retires
-when upstream ships wheels for these Pythons itself — nothing here shadows a wheel upstream
-provides, and pip pools this index with PyPI either way.
-
-Publishing needs GitHub Pages set to deploy from GitHub Actions, once, under Settings → Pages.
-Every action used here is one of GitHub's own, so a repository restricting Actions to its owner
-needs "Allow actions created by GitHub" ticked as well, but nothing looser. The repository has
-to stay public for Pages and the Actions minutes.
+This is not a fork — no copy of python-rtmidi lives here. A public GitHub Actions workflow
+downloads the release's own source distribution from PyPI, verifies it against a digest pinned
+in this repository, and builds it unmodified with the settings in `cibuildwheel.toml`, running
+upstream's test suite on every wheel. Each build batch is published as a numbered, immutable
+GitHub release holding the wheels, their digests, and the source of the bundled libjack, and
+the index page is regenerated over all of them. The files here document their own decisions;
+`MAINTAINING.md` holds the runbook.
 
 ## License
 
-The build configuration and scripts in this repository are placed in the public domain under
-CC0 1.0; see `LICENSE`. That grant covers this repository's files only — not python-rtmidi, and
-not the wheels.
-
-The wheels carry python-rtmidi under its MIT license, which travels inside every wheel. The
-Linux wheels additionally bundle libjack from [jack2](https://github.com/jackaudio/jack2),
-under the GNU Lesser General Public License v2.1 or later: the license text and notice are
-inside each wheel, and the exact source is attached to each release. The Windows wheels bundle
-msvcp140.dll under the terms Microsoft grants for redistributing that runtime's files.
+The build configuration and scripts in this repository are public domain under CC0 1.0
+(`LICENSE`); that grant covers this repository's files only, not the wheels. The wheels carry
+python-rtmidi's MIT license. The Linux wheels additionally bundle libjack from
+[jack2](https://github.com/jackaudio/jack2) under the LGPL v2.1 or later, with the license text
+and notice inside each wheel and the exact source attached to each release; the Windows wheels
+bundle msvcp140.dll under the terms Microsoft grants for redistributing that runtime's files.

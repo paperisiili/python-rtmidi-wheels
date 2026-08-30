@@ -3,7 +3,7 @@
 The build cannot check this itself: cibuildwheel exits green as long as something built, and the
 bundling steps — auditwheel, delvewheel, add_notices — each see one wheel at a time. This
 runs once over the merged set and fails the workflow when the set is short, a wheel belongs to a
-different release, or a wheel's contents are missing what the README promises: bundled libjack
+different release, or a wheel's contents are not what these wheels promise: bundled libjack
 with its license files on Linux, the MSVC runtime on Windows, nothing bundled on macOS.
 """
 
