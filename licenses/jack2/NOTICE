@@ -1,0 +1,14 @@
+The libjack shared library bundled in this wheel's python_rtmidi.libs directory is the JACK
+client library from jack2, built unmodified from
+
+    https://github.com/jackaudio/jack2
+    version 1.9.22, commit 4f58969432339a250ce87fe855fb962c67d00ddb
+
+jack2's client library is licensed under the GNU Lesser General Public License, version 2.1 or
+later; the license text is in COPYING.LESSER beside this notice. The exact source tree it was
+built from is archived as jack2-1.9.22-source.tar.gz among the assets of the GitHub release this
+wheel was published in, under
+
+    https://github.com/paperisiili/python-rtmidi-wheels/releases
+
+python-rtmidi itself is MIT licensed; its license is the LICENSE.md in this wheel's dist-info.
