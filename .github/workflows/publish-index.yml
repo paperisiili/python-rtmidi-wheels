@@ -54,7 +54,7 @@ jobs:
           tags=$(jq -r '.[] | select((.draft or .prerelease) | not) | .tag_name' releases.json \
             | grep -E '^v[0-9]+$' || true)
           for tag in $tags; do
-            gh release download "$tag" --pattern SHA256SUMS --output "sums/$tag"
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS --output "sums/$tag"
           done
 
       - name: Write the index

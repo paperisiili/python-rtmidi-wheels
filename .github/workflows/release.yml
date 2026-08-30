@@ -144,6 +144,7 @@ jobs:
             echo "The bundled jack2's exact source tree is attached."
           } > notes.md
           gh release create "$TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
             --target "$SHA" \
             --title "$TAG: python-rtmidi $version" \
             --notes-file notes.md
