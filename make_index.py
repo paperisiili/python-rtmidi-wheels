@@ -94,6 +94,17 @@ def read_digests(sums_file: Path) -> dict[str, str]:
     return digests
 
 
+def first_paragraph(text: str) -> str:
+    """Return text up to its first blank line.
+
+    A release body is the dispatched notes, then a blank line, then references to the release's
+    own files — SHA256SUMS, the jack2 source, the attestations. Those references belong on the
+    release page, where the files are; here only the notes appear, and the release-page link
+    carries the rest.
+    """
+    return re.split(r"\n\s*\n", text or "", maxsplit=1)[0]
+
+
 def paragraphs(text: str) -> str:
     """Render plain text as escaped HTML paragraphs."""
     blocks = [block.strip() for block in re.split(r"\n\s*\n", text or "") if block.strip()]
@@ -126,7 +137,7 @@ def release_section(release: dict, digests: dict[str, str]) -> str:
         versions=html.escape(", ".join(sorted(versions))),
         date=html.escape(release["published_at"].split("T")[0]),
         release_url=html.escape(release["html_url"]),
-        notes=paragraphs(release.get("body") or ""),
+        notes=paragraphs(first_paragraph(release.get("body") or "")),
         links="\n".join(links),
     )
 

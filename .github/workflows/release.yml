@@ -139,6 +139,9 @@ jobs:
         run: |
           set -- dist/*.whl
           version=$(basename "$1" | cut -d- -f2)
+          # The index page shows only the first paragraph of a release body — the notes given
+          # here. Everything after the blank line references this release's own files, which
+          # only make sense on the release page beside them.
           {
             printf '%s\n\n' "$NOTES"
             echo "python-rtmidi $version, built from commit $SHA by $RUN_URL."
